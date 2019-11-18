@@ -8,6 +8,7 @@ from ckan.cli import (
     datapusher,
     click_config_option, db, load_config, search_index, server,
     asset,
+    rdf_export,
     datastore,
     translation,
     dataset,
@@ -44,6 +45,7 @@ ckan.add_command(config_tool.config_tool)
 ckan.add_command(server.run)
 ckan.add_command(seed.seed)
 ckan.add_command(db.db)
+ckan.add_command(rdf_export.rdf_export)
 ckan.add_command(datapusher.datapusher)
 ckan.add_command(search_index.search_index)
 ckan.add_command(asset.asset)
