@@ -123,6 +123,9 @@ def load_environment(global_conf, app_conf):
     # load all CKAN plugins
     p.load_all()
 
+    if not p.plugin_loaded('managed_search_schema'):
+        search.check_solr_schema_version()
+
     # Check Redis availability
     if not is_redis_available():
         log.critical('Could not connect to Redis.')
@@ -234,7 +237,6 @@ def update_config():
     search.SolrSettings.init(config.get('solr_url'),
                              config.get('solr_user'),
                              config.get('solr_password'))
-    search.check_solr_schema_version()
 
     if six.PY2:
         routes_map = routing.make_map()

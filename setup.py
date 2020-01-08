@@ -117,6 +117,7 @@ entry_points = {
         'datatables_view = ckanext.datatablesview.plugin:DataTablesView',
         'image_view = ckanext.imageview.plugin:ImageView',
         'webpage_view = ckanext.webpageview.plugin:WebPageView',
+        'managed_search_schema = ckanext.managed_search_schema.plugin:ManagedSearchSchemaPlugin',
         # FIXME: Remove deprecated resource previews below. You should use the
         # versions as *_view instead.
         'text_preview = ckanext.textview.plugin:TextView',
