@@ -56,7 +56,7 @@ class CustomGroup(click.Group):
         if ext_commands:
             with formatter.section(u'Plugins'):
                 for ext, rows in ext_commands.items():
-                    heading = "[{}]".format(click.style(ext, fg='green'))
+                    heading = u"[{}]".format(click.style(ext, fg=u"green"))
                     with formatter.section(heading):
                         formatter.write_dl(rows)
 
