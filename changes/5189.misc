@@ -1,0 +1,4 @@
+Dataset type is used when building URLs(eg. `/showcase/edit/NAME`
+intead of `/dataset/edig/NAME` when `dataset['type']=='showcase'`)
+and, whenever it's possible, in UI(eg. page title is **Create Showcase
+- CKAN** instead of **Create Dataset - CKAN**)

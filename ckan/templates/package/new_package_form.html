@@ -10,7 +10,7 @@
   {% if form_style != 'edit' %}
     {{ super() }}
   {% else %}
-    {{ _('Update Dataset') }}
+    {{ _('Update ' ~ dataset_type.title()) }}
   {% endif %}
 {% endblock %}
 
