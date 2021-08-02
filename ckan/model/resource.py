@@ -35,16 +35,17 @@ resource_table = Table(
            default=_types.make_uuid),
     Column('package_id', types.UnicodeText,
            ForeignKey('package.id')),
-    Column('url', types.UnicodeText, nullable=False),
+    Column('url', types.UnicodeText, nullable=False, doc='remove_if_not_provided'),
+    # XXX: format doc='remove_if_not_provided' makes lots of tests fail, fix tests?
     Column('format', types.UnicodeText),
-    Column('description', types.UnicodeText),
+    Column('description', types.UnicodeText, doc='remove_if_not_provided'),
     Column('hash', types.UnicodeText),
     Column('position', types.Integer),
 
     Column('name', types.UnicodeText),
-    Column('resource_type', types.UnicodeText),
-    Column('mimetype', types.UnicodeText),
-    Column('mimetype_inner', types.UnicodeText),
+    Column('resource_type', types.UnicodeText, doc='remove_if_not_provided'),
+    Column('mimetype', types.UnicodeText, doc='remove_if_not_provided'),
+    Column('mimetype_inner', types.UnicodeText, doc='remove_if_not_provided'),
     Column('size', types.BigInteger),
     Column('created', types.DateTime, default=datetime.datetime.utcnow),
     Column('last_modified', types.DateTime),
@@ -130,25 +131,6 @@ class Resource(core.StatefulObjectMixin,
             for field in cls.extra_columns:
                 setattr(cls, field, DictProxy(field, 'extras'))
         return cls.extra_columns
-
-    @classmethod
-    def get_all_without_views(cls, formats=[]):
-        '''Returns all resources that have no resource views
-
-        :param formats: if given, returns only resources that have no resource
-            views and are in any of the received formats
-        :type formats: list
-
-        :rtype: list of ckan.model.Resource objects
-        '''
-        query = meta.Session.query(cls).outerjoin(ckan.model.ResourceView) \
-                    .filter(ckan.model.ResourceView.id == None)
-
-        if formats:
-            lowercase_formats = [f.lower() for f in formats]
-            query = query.filter(func.lower(cls.format).in_(lowercase_formats))
-
-        return query.all()
 
     def related_packages(self):
         return [self.package]

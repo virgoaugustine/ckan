@@ -49,22 +49,8 @@ class TestConfig(object):
         reset_index_response = app.get("/")
         assert "Welcome - CKAN" in reset_index_response
 
-    def test_main_css_list(self, app, sysadmin_env):
-        """Style list contains pre-configured styles"""
-
-        STYLE_NAMES = ["Default", "Red", "Green", "Maroon", "Fuchsia"]
-
-        url = url_for(u"admin.config")
-        config_response = app.get(url, environ_overrides=sysadmin_env)
-        config_response_html = BeautifulSoup(config_response.body)
-        style_select_options = config_response_html.select(
-            "#field-ckan-main-css option"
-        )
-        for option in style_select_options:
-            assert option.string in STYLE_NAMES
-
     def test_main_css(self, app, sysadmin_env):
-        """Select a colour style"""
+        """Define a custom css file"""
 
         # current style
         index_response = app.get("/")
@@ -72,10 +58,10 @@ class TestConfig(object):
 
         url = url_for(u"admin.config")
         # set new style css
-        form = {"ckan.main_css": "/base/css/red.css", "save": ""}
+        form = {"ckan.main_css": "/base/css/main-rtl.css", "save": ""}
         resp = app.post(url, data=form, environ_overrides=sysadmin_env)
 
-        assert "red.css" in resp or "red.min.css" in resp
+        assert "main-rtl.css" in resp or "main-rtl.min.css" in resp
         assert not helpers.body_contains(resp, "main.min.css")
 
     def test_tag_line(self, app, sysadmin_env):
@@ -155,20 +141,19 @@ class TestConfig(object):
         intro_response_html = BeautifulSoup(app.get("/").body)
         style_tag = intro_response_html.select("head style")
         assert len(style_tag) == 0
-
         # set new tagline css
         url = url_for(u"admin.config")
         form = {
             "ckan.site_custom_css": "body {background-color:red}",
             "save": "",
         }
-        resp = app.post(url, data=form, environ_overrides=sysadmin_env)
+        app.post(url, data=form, environ_overrides=sysadmin_env)
 
         # new tagline not visible yet
         new_intro_response_html = BeautifulSoup(app.get("/").body)
         style_tag = new_intro_response_html.select("head style")
         assert len(style_tag) == 1
-        assert style_tag[0].text.strip() == "body {background-color:red}"
+        assert style_tag[0].string.strip() == "body {background-color:red}"
 
         # reset config value
         _reset_config(app)
@@ -348,6 +333,30 @@ class TestTrashView(object):
         # One entity of each type in the list to purge
         assert entities_amount == 3
 
+    def test_trash_purge_custom_ds_type(self, app, sysadmin_env):
+        """Posting the trash view with 'deleted' datasets, purges the
+        datasets."""
+        factories.Dataset(state="deleted", type="custom_dataset")
+
+        # how many datasets before purge
+        pkgs_before_purge = model.Session.query(model.Package).count()
+        assert pkgs_before_purge == 1
+
+        trash_url = url_for("admin.trash")
+        response = app.post(
+            trash_url,
+            data={"action": "package"},
+            extra_environ=sysadmin_env,
+            status=200
+        )
+
+        # check for flash success msg
+        assert "datasets have been purged" in response.body
+
+        # how many datasets after purge
+        pkgs_after_purge = model.Session.query(model.Package).count()
+        assert pkgs_after_purge == 0
+
     def test_trash_purge_deleted_datasets(self, app, sysadmin_env):
         """Posting the trash view with 'deleted' datasets, purges the
         datasets."""
@@ -431,15 +440,16 @@ class TestTrashView(object):
     def test_trash_purge_all(self, app, sysadmin_env):
         """Posting the trash view with 'deleted' entities and
         purge all button purges everything"""
-        factories.Dataset(state="deleted")
+        factories.Dataset(state="deleted", type="custom_dataset")
         factories.Group(state="deleted")
         factories.Organization(state="deleted")
+        factories.Organization(state="deleted", type="custom_org")
         factories.Organization()
 
         # how many entities before purge
         pkgs_before_purge = model.Session.query(model.Package).count()
         orgs_and_grps_before_purge = model.Session.query(model.Group).count()
-        assert pkgs_before_purge + orgs_and_grps_before_purge == 4
+        assert pkgs_before_purge + orgs_and_grps_before_purge == 5
 
         trash_url = url_for("admin.trash")
         response = app.post(

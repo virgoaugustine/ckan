@@ -17,8 +17,13 @@ class CKANConfigLoader(object):
         self.config_file = filename.strip()
         self.config = dict()
         self.parser = ConfigParser()
+        # Preserve case in config keys
+        self.parser.optionxform = str
         self.section = u'app:main'
-        defaults = {u'__file__': os.path.abspath(self.config_file)}
+        defaults = dict(
+            (k, v) for k, v in os.environ.items()
+            if k.startswith("CKAN_"))
+        defaults['__file__'] = os.path.abspath(self.config_file)
         self._update_defaults(defaults)
         self._create_config_object()
 
@@ -41,7 +46,8 @@ class CKANConfigLoader(object):
                     self.config[u'global_conf'][option] = value
 
     def _create_config_object(self):
-        self._read_config_file(self.config_file)
+        use_config_path = self.config_file
+        self._read_config_file(use_config_path)
 
         # # The global_config key is to keep compatibility with Pylons.
         # # It can be safely removed when the Flask migration is completed.
@@ -49,12 +55,30 @@ class CKANConfigLoader(object):
 
         self._update_config()
 
-        schema, path = self.parser.get(self.section, u'use').split(u':')
-        if schema == u'config':
-            use_config_path = os.path.join(
-                os.path.dirname(os.path.abspath(self.config_file)), path)
-            self._read_config_file(use_config_path)
-            self._update_config()
+        loaded_files = [use_config_path]
+
+        while True:
+            schema, path = self.parser.get(self.section, u'use').split(u':')
+            if schema == u'config':
+                use_config_path = os.path.join(
+                    os.path.dirname(os.path.abspath(use_config_path)), path)
+                # Avoid circular references
+                if use_config_path in loaded_files:
+                    chain = ' -> '.join(loaded_files + [use_config_path])
+                    raise CkanConfigurationException(
+                        'Circular dependency located in '
+                        f'the configuration chain: {chain}'
+                    )
+                loaded_files.append(use_config_path)
+
+                self._read_config_file(use_config_path)
+                self._update_config()
+            else:
+                break
+        log.debug(
+            u'Loaded configuration from the following files: %s',
+            loaded_files
+        )
 
     def get_config(self):
         return self.config.copy()
@@ -75,21 +99,28 @@ def load_config(ini_path=None):
         config_source = u'$CKAN_INI'
     else:
         # deprecated method since CKAN 2.9
-        default_filename = u'development.ini'
-        filename = os.path.join(os.getcwd(), default_filename)
-        if not os.path.exists(filename):
+        default_filenames = [u'ckan.ini', u'development.ini']
+        filename = None
+        for default_filename in default_filenames:
+            check_file = os.path.join(os.getcwd(), default_filename)
+            if os.path.exists(check_file):
+                filename = check_file
+                break
+        if not filename:
             # give really clear error message for this common situation
-            msg = u'ERROR: You need to specify the CKAN config (.ini) '\
-                u'file path.'\
-                u'\nUse the --config parameter or set environment ' \
-                u'variable CKAN_INI or have {}\nin the current directory.' \
-                .format(default_filename)
+            msg = u'''
+ERROR: You need to specify the CKAN config (.ini) file path.
+
+Use the --config parameter or set environment variable CKAN_INI
+or have one of {} in the current directory.'''
+            msg = msg.format(u', '.join(default_filenames))
             raise CkanConfigurationException(msg)
 
     if not os.path.exists(filename):
         msg = u'Config file not found: %s' % filename
         msg += u'\n(Given by: %s)' % config_source
         raise CkanConfigurationException(msg)
+
     config_loader = CKANConfigLoader(filename)
     loggingFileConfig(filename)
     log.info(u'Using configuration file {}'.format(filename))

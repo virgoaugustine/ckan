@@ -76,7 +76,7 @@ class TestGroupController(object):
 
 
 @pytest.mark.ckan_config("ckan.plugins", "example_igroupform_organization")
-@pytest.mark.usefixtures("clean_db", "with_plugins", "with_request_context")
+@pytest.mark.usefixtures("clean_db", "clean_index", "with_plugins", "with_request_context")
 class TestOrganizationController(object):
     def test_about(self, app):
         user = factories.User()
@@ -122,6 +122,24 @@ class TestOrganizationController(object):
         assert helpers.body_contains(
             response,
             'data-module-placeholder="&lt;{}&gt;"'.format(custom_group_type),
+        )
+
+    def test_pagination(self, app):
+        user = factories.User()
+        group = factories.Organization(user=user, type=custom_group_type)
+        group_name = group["name"]
+        for i in range(0, 21):
+            factories.Dataset(owner_org=group['id'], user=user)
+        env = {"REMOTE_USER": six.ensure_str(user["name"])}
+        url = url_for("%s.read" % custom_group_type, id=group_name)
+        response = app.get(url=url, extra_environ=env)
+        assert helpers.body_contains(
+            response,
+            '/grup/{}?page=2'.format(group_name)
+        )
+        assert not helpers.body_contains(
+            response,
+            '/organization/{}?page=2'.format(group_name)
         )
 
 
@@ -244,3 +262,40 @@ class TestGroupBlueprintPreparations(object):
             a['href'] for a in page.select(".breadcrumb a")
         ]
         assert links == ['/', '/fancy_type/']
+
+
+@pytest.mark.ckan_config("ckan.plugins", u"example_igroupform")
+@pytest.mark.usefixtures(
+    "with_plugins", "with_request_context", "clean_db"
+)
+class TestCustomGroupBlueprint(object):
+    def test_group_listing_labels(self, app):
+        resp = app.get("/grup", status=200)
+        page = bs4.BeautifulSoup(resp.body)
+        links = page.select(".breadcrumb a")
+        assert [a["href"] for a in links] == ["/", "/grup/"]
+        assert links[-1].text == "Grups"
+        assert page.head.title.text.startswith("Grups")
+
+    def test_group_creation_labels(self, app):
+        user = factories.User()
+        env = {"REMOTE_USER": user["name"]}
+
+        resp = app.get("/grup", status=200, extra_environ=env)
+        page = bs4.BeautifulSoup(resp.body)
+        btn = page.select_one('.page_primary_action .btn')
+        assert btn.text.strip() == 'Add Grup'
+
+        resp = app.get("/grup/new", status=200, extra_environ=env)
+        page = bs4.BeautifulSoup(resp.body)
+        assert page.select_one('.page-heading').text.strip() == 'Create Grup'
+        assert page.select_one(
+            '.form-actions .btn').text.strip() == 'Create Grup'
+
+    @pytest.mark.ckan_config('ckan.default.group_type', 'grup')
+    def test_default_group_type(self, app):
+        resp = app.get("/", status=200)
+        page = bs4.BeautifulSoup(resp.body)
+        link = page.select_one('.masthead .nav a[href="/grup/"]')
+        assert link
+        assert link.text == 'Grups'

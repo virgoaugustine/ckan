@@ -11,9 +11,10 @@ from ckan.logic.auth.create import _check_group_auth
 
 @logic.auth_allow_anonymous_access
 def package_update(context, data_dict):
+    model = context['model']
     user = context.get('user')
-    package = logic_auth.get_package_object(context, data_dict)
 
+    package = logic_auth.get_package_object(context, data_dict)
     if package.owner_org:
         # if there is an owner org then we must have update_dataset
         # permission for that organization
@@ -34,10 +35,20 @@ def package_update(context, data_dict):
                 'create_unowned_dataset',
                 )) or authz.has_user_permission_for_some_org(
                 user, 'create_dataset')
+
     if not check1:
-        return {'success': False,
-                'msg': _('User %s not authorized to edit package %s') %
-                        (str(user), package.id)}
+        success = False
+        if authz.check_config_permission('allow_dataset_collaborators'):
+            # if org-level auth failed, check dataset-level auth
+            # (ie if user is a collaborator)
+            user_obj = model.User.get(user)
+            if user_obj:
+                success = authz.user_is_collaborator_on_dataset(
+                    user_obj.id, package.id, ['admin', 'editor'])
+        if not success:
+            return {'success': False,
+                    'msg': _('User %s not authorized to edit package %s') %
+                            (str(user), package.id)}
     else:
         check2 = _check_group_auth(context, data_dict)
         if not check2:
@@ -46,6 +57,11 @@ def package_update(context, data_dict):
                             (str(user))}
 
     return {'success': True}
+
+
+def package_revise(context, data_dict):
+    return authz.is_authorized('package_update', context, data_dict['update'])
+
 
 def package_resource_reorder(context, data_dict):
     ## the action function runs package update so no need to run it twice
@@ -209,15 +225,6 @@ def user_generate_apikey(context, data_dict):
             ' {1}'.format(user, user_obj.id))}
 
 
-def revision_change_state(context, data_dict):
-    # FIXME currently only sysadmins can change state
-    user = context['user']
-    return {
-        'success': False,
-        'msg': _('User %s not authorized to change state of revision') % user
-    }
-
-
 def task_status_update(context, data_dict):
     # sysadmins only
     user = context['user']
@@ -290,6 +297,6 @@ def bulk_update_delete(context, data_dict):
 def config_option_update(context, data_dict):
     '''Update the runtime-editable configuration options
 
-       Only sysdmins can do it
+       Only sysadmins can do it
     '''
     return {'success': False}

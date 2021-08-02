@@ -1,8 +1,10 @@
 # encoding: utf-8
 
 from bs4 import BeautifulSoup
-import mock
+from werkzeug.routing import BuildError
+import unittest.mock as mock
 
+import ckan.authz as authz
 from ckan.lib.helpers import url_for
 import pytest
 import six
@@ -11,6 +13,8 @@ import ckan.model as model
 import ckan.model.activity as activity_model
 import ckan.plugins as p
 import ckan.lib.dictization as dictization
+import ckan.logic as logic
+
 from ckan.logic.validators import object_id_validators, package_id_exists
 
 import ckan.tests.helpers as helpers
@@ -48,27 +52,29 @@ class TestPackageNew(object):
 
         env = {"REMOTE_USER": six.ensure_str(sysadmin["name"])}
         response = app.get(url=url_for("dataset.new"), extra_environ=env)
-        assert url_for(controller="organization", action="new") in response
+        assert url_for("organization.new") in response
 
     @pytest.mark.ckan_config("ckan.auth.create_unowned_dataset", "false")
     @pytest.mark.ckan_config("ckan.auth.user_create_organizations", "false")
-    @mock.patch("ckan.logic.auth.create.package_create")
     def test_needs_organization_but_no_organizations_no_button(
-        self, mock_p_create, app
+        self, monkeypatch, app
     ):
         """ Scenario: The settings say every dataset needs an organization
         but there are no organizations. If the user is not allowed to create an
         organization they should be told to ask the admin but no link should be
         presented. Note: This cannot happen with the default ckan and requires
         a plugin to overwrite the package_create behavior"""
-        mock_p_create.return_value = {"success": True}
+        authz._AuthFunctions.get('package_create')
+        monkeypatch.setitem(
+            authz._AuthFunctions._functions, 'package_create',
+            lambda *args: {'success': True})
 
         user = factories.User()
 
         env = {"REMOTE_USER": six.ensure_str(user["name"])}
         response = app.get(url=url_for("dataset.new"), extra_environ=env)
 
-        assert url_for(controller="organization", action="new") not in response
+        assert url_for("organization.new") not in response
         assert "Ask a system administrator" in response
 
     def test_name_required(self, app, user_env):
@@ -510,6 +516,99 @@ class TestPackageEdit(object):
 
         )
         assert 404 == response.status_code
+
+
+@pytest.mark.usefixtures("clean_db", "with_request_context")
+class TestPackageOwnerOrgList(object):
+
+    owner_org_select = '<select id="field-organizations" name="owner_org"'
+
+    def test_org_list_shown_if_new_dataset_and_user_is_admin_or_editor_in_an_org(self, app):
+        user = factories.User()
+        organization = factories.Organization(
+            users=[{"name": user["id"], "capacity": "admin"}]
+        )
+        env = {"REMOTE_USER": six.ensure_str(user["name"])}
+        response = app.get(
+            url_for("dataset.new"), extra_environ=env
+        )
+        assert self.owner_org_select in response.body
+
+    def test_org_list_shown_if_admin_or_editor_of_the_dataset_org(self, app):
+        user = factories.User()
+        organization = factories.Organization(
+            users=[{"name": user["id"], "capacity": "admin"}]
+        )
+        dataset = factories.Dataset(owner_org=organization["id"])
+        env = {"REMOTE_USER": six.ensure_str(user["name"])}
+        response = app.get(
+            url_for("dataset.edit", id=dataset["name"]), extra_environ=env
+        )
+        assert self.owner_org_select in response.body
+
+    @pytest.mark.ckan_config('ckan.auth.allow_dataset_collaborators', True)
+    def test_org_list_not_shown_if_user_is_a_collaborator_with_default_config(self, app):
+
+        organization1 = factories.Organization()
+        dataset = factories.Dataset(owner_org=organization1["id"])
+
+        user = factories.User()
+        organization2 = factories.Organization(
+            users=[{"name": user["id"], "capacity": "admin"}]
+        )
+        helpers.call_action(
+            'package_collaborator_create',
+            id=dataset['id'], user_id=user['id'], capacity='editor')
+
+        env = {"REMOTE_USER": six.ensure_str(user["name"])}
+        response = app.get(
+            url_for("dataset.edit", id=dataset["name"]), extra_environ=env
+        )
+        assert self.owner_org_select not in response.body
+
+        response = app.post(
+            url_for("dataset.edit", id=dataset["name"]), extra_environ=env,
+            data={
+                "notes": "changed",
+                "save": ""
+            },
+            follow_redirects=False
+        )
+        updated_dataset = helpers.call_action("package_show", id=dataset["id"])
+        assert updated_dataset['owner_org'] == organization1['id']
+
+    @pytest.mark.ckan_config('ckan.auth.allow_dataset_collaborators', True)
+    @pytest.mark.ckan_config('ckan.auth.allow_collaborators_to_change_owner_org', True)
+    def test_org_list_shown_if_user_is_a_collaborator_with_config_enabled(self, app):
+
+        organization1 = factories.Organization()
+        dataset = factories.Dataset(owner_org=organization1["id"])
+
+        user = factories.User()
+        organization2 = factories.Organization(
+            users=[{"name": user["id"], "capacity": "admin"}]
+        )
+        helpers.call_action(
+            'package_collaborator_create',
+            id=dataset['id'], user_id=user['id'], capacity='editor')
+
+        env = {"REMOTE_USER": six.ensure_str(user["name"])}
+        response = app.get(
+            url_for("dataset.edit", id=dataset["name"]), extra_environ=env,
+        )
+        assert self.owner_org_select in response.body
+
+        response = app.post(
+            url_for("dataset.edit", id=dataset["name"]), extra_environ=env,
+            data={
+                "notes": "changed",
+                "owner_org": organization2['id'],
+                "save": ""
+            },
+            follow_redirects=False
+        )
+        updated_dataset = helpers.call_action("package_show", id=dataset["id"])
+        assert updated_dataset['owner_org'] == organization2['id']
 
 
 @pytest.mark.usefixtures("clean_db", "with_request_context")
@@ -967,6 +1066,29 @@ class TestResourceNew(object):
                 data={"name": "test", "url": "test", "save": "save", "id": ""},
                 status=403,
             )
+
+
+@pytest.mark.usefixtures("clean_db", "with_plugins", "with_request_context")
+class TestResourceDownload(object):
+
+    def test_resource_download_content_type(self, create_with_upload, app):
+
+        dataset = factories.Dataset()
+        resource = create_with_upload(
+            u"hello,world", u"file.csv",
+            package_id=dataset[u"id"]
+        )
+
+        assert resource[u"mimetype"] == u"text/csv"
+        url = url_for(
+            u"{}_resource.download".format(dataset[u"type"]),
+            id=dataset[u"id"],
+            resource_id=resource[u"id"],
+        )
+
+        response = app.get(url)
+
+        assert response.headers[u"Content-Type"] == u"text/csv"
 
 
 @pytest.mark.ckan_config("ckan.plugins", "image_view")
@@ -1448,6 +1570,25 @@ class TestSearch(object):
         assert len(ds_titles) == 1
         assert "Dataset One" in ds_titles
 
+    @pytest.mark.ckan_config('ckan.datasets_per_page', 1)
+    def test_repeatable_params(self, app):
+        """Searching for datasets returns expected results."""
+
+        factories.Dataset(name="dataset-one", title="Test Dataset One")
+        factories.Dataset(name="dataset-two", title="Test Dataset Two")
+
+        search_url = url_for("dataset.search", title=['Test', 'Dataset'])
+        search_results = app.get(search_url)
+        html = BeautifulSoup(search_results.data)
+        links = html.select('.pagination a')
+        # first, second and "Next" pages
+        assert len(links) == 3
+
+        params = [set(urlparse(a['href']).query.split('&')) for a in links]
+        for group in params:
+            assert 'title=Test' in group
+            assert 'title=Dataset' in group
+
     def test_search_page_no_results(self, app):
         """Search with non-returning phrase returns no results."""
 
@@ -1639,6 +1780,23 @@ class TestSearch(object):
         )
         assert [n.string for n in ds_titles] == ["A private dataset"]
 
+    def test_search_with_extra_params(self, app, monkeypatch):
+        url = url_for('dataset.search')
+        url += '?ext_a=1&ext_a=2&ext_b=3'
+        search_result = {
+            'count': 0,
+            'sort': "score desc, metadata_modified desc",
+            'facets': {},
+            'search_facets': {},
+            'results': []
+        }
+        search = mock.Mock(return_value=search_result)
+        logic._actions['package_search'] = search
+        app.get(url)
+        search.assert_called()
+        extras = search.call_args[0][1]['extras']
+        assert extras == {'ext_a': ['1', '2'], 'ext_b': '3'}
+
 
 @pytest.mark.usefixtures("clean_db", "with_request_context")
 class TestPackageFollow(object):
@@ -1751,7 +1909,8 @@ class TestDatasetRead(object):
         assert response.headers['location'] == expected_url
 
     def test_redirect_also_with_activity_parameter(self, app):
-        dataset = factories.Dataset()
+        user = factories.User()
+        dataset = factories.Dataset(user=user)
         activity = activity_model.package_activity_list(
             dataset["id"], limit=1, offset=0
         )[0]
@@ -2151,3 +2310,57 @@ class TestChanges(object):  # i.e. the diff
         )
         assert helpers.body_contains(response, "First")
         assert helpers.body_contains(response, "Second")
+
+
+@pytest.mark.usefixtures('clean_db', 'with_request_context')
+class TestCollaborators(object):
+
+    def test_collaborators_tab_not_shown(self, app):
+        dataset = factories.Dataset()
+        sysadmin = factories.Sysadmin()
+
+        env = {'REMOTE_USER': six.ensure_str(sysadmin['name'])}
+        response = app.get(url=url_for('dataset.edit', id=dataset['name']), extra_environ=env)
+        assert 'Collaborators' not in response
+
+        # Route not registered
+        with pytest.raises(BuildError):
+            url = url_for('dataset.collaborators_read', id=dataset['name'])
+        app.get(
+            '/dataset/collaborators/{}'.format(dataset['name']), extra_environ=env, status=404)
+
+    @pytest.mark.ckan_config('ckan.auth.allow_dataset_collaborators', 'true')
+    def test_collaborators_tab_shown(self, app):
+        dataset = factories.Dataset()
+        sysadmin = factories.Sysadmin()
+
+        env = {'REMOTE_USER': six.ensure_str(sysadmin['name'])}
+        response = app.get(url=url_for('dataset.edit', id=dataset['name']), extra_environ=env)
+        assert 'Collaborators' in response
+
+        # Route registered
+        url = url_for('dataset.collaborators_read', id=dataset['name'])
+        app.get(url, extra_environ=env)
+
+    @pytest.mark.ckan_config('ckan.auth.allow_dataset_collaborators', 'true')
+    def test_collaborators_no_admins_by_default(self, app):
+        dataset = factories.Dataset()
+        sysadmin = factories.Sysadmin()
+
+        env = {'REMOTE_USER': six.ensure_str(sysadmin['name'])}
+        url = url_for('dataset.new_collaborator', id=dataset['name'])
+        response = app.get(url, extra_environ=env)
+
+        assert '<option value="admin">' not in response
+
+    @pytest.mark.ckan_config('ckan.auth.allow_dataset_collaborators', 'true')
+    @pytest.mark.ckan_config('ckan.auth.allow_admin_collaborators', 'true')
+    def test_collaborators_admins_enabled(self, app):
+        dataset = factories.Dataset()
+        sysadmin = factories.Sysadmin()
+
+        env = {'REMOTE_USER': six.ensure_str(sysadmin['name'])}
+        url = url_for('dataset.new_collaborator', id=dataset['name'])
+        response = app.get(url, extra_environ=env)
+
+        assert '<option value="admin">' in response

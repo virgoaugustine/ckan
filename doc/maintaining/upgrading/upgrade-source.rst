@@ -45,6 +45,7 @@ CKAN release you're upgrading to:
 
      pip install --upgrade -r requirements.txt
 
+
 #. Register any new or updated plugins:
 
    ::
@@ -78,11 +79,11 @@ CKAN release you're upgrading to:
    ``ckan search-index rebuild`` command.
 
 #. Finally, restart your web server. For example if you have deployed CKAN
-   using the Apache web server on Ubuntu linux, run this command:
+   using a package install, run this command:
 
    .. parsed-literal::
 
-    |reload_apache|
+    |restart_uwsgi|
 
 #. You're done!
 

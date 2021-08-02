@@ -39,14 +39,14 @@ to serve the CSS file with Webassets.
    register your assets directory with CKAN. Edit the ``update_config()``
    method in your ``plugin.py`` file:
 
-   .. literalinclude:: /../ckanext/example_theme_docs/v15_fanstatic/plugin.py
+   .. literalinclude:: /../ckanext/example_theme_docs/v15_webassets/plugin.py
       :pyobject: ExampleThemePlugin.update_config
 
 3. Finally, edit your extension's ``templates/base.html`` file and use CKAN's
    custom Jinja2 tag ``{% asset %}`` instead of the normal ``<link>`` tag to
    import the file:
 
-   .. literalinclude:: /../ckanext/example_theme_docs/v15_fanstatic/templates/base.html
+   .. literalinclude:: /../ckanext/example_theme_docs/v15_webassets/templates/base.html
       :language: django
 
 .. note::
@@ -67,3 +67,19 @@ to serve the CSS file with Webassets.
   include files in, whether to include files at the top or bottom of
   the page, dependencies between files, etc.) See
   :doc:`/contributing/frontend/assets` for details.
+
+
+.. _x-sendfile:
+
+X-Sendfile
+^^^^^^^^^^
+
+For web servers which support the *X-Sendfile* feature, you can set
+``ckan.webassets.use_x_sendfile`` config option to ``true`` and
+configure the web server (eg `Nginx
+<https://www.nginx.com/resources/wiki/start/topics/examples/xsendfile/>`_)
+in order to serve static files in a more efficient way. Static files
+served under the URI ``/webassets/<PATH_TO_STATIC_FILE>`` are stored
+in the file system under the path specified by :ref:`ckan.webassets.path` the config
+option. If ``ckan.webassets.path`` is not specified, static files are
+stored inside a ``webassests`` folder defined by the :ref:`ckan.storage_path` config option.

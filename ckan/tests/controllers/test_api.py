@@ -6,56 +6,38 @@ controller itself.
 import json
 import re
 
-import mock
 import pytest
 import six
-
-from pyfakefs import fake_filesystem
 
 from ckan.lib.helpers import url_for
 import ckan.tests.helpers as helpers
 from ckan.tests import factories
 from ckan.lib import uploader as ckan_uploader
 
-try:
-    import __builtin__ as builtins
-except ImportError:
-    import builtins
-
-fs = fake_filesystem.FakeFilesystem()
-fake_os = fake_filesystem.FakeOsModule(fs)
-fake_open = fake_filesystem.FakeFileOpen(fs)
-real_open = open
-
-
-def mock_open_if_open_fails(*args, **kwargs):
-    try:
-        return real_open(*args, **kwargs)
-    except (OSError, IOError):
-        return fake_open(*args, **kwargs)
-
 
 @pytest.mark.usefixtures("clean_db", "with_request_context")
 class TestApiController(object):
-    @pytest.mark.ckan_config("ckan.storage_path", "/doesnt_exist")
-    @mock.patch.object(ckan_uploader, "os", fake_os)
-    @mock.patch.object(ckan_uploader, "_storage_path", new="/doesnt_exist")
-    def test_resource_create_upload_file(self, app, monkeypatch):
+    def test_resource_create_upload_file(
+            self, app, monkeypatch, tmpdir, ckan_config):
+        monkeypatch.setitem(ckan_config, u'ckan.storage_path', str(tmpdir))
+        monkeypatch.setattr(ckan_uploader, u'_storage_path', str(tmpdir))
+
         user = factories.User()
         pkg = factories.Dataset(creator_user_id=user["id"])
 
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="resource_create",
-            ver="/3",
+            ver=3,
         )
         env = {"REMOTE_USER": six.ensure_str(user["name"])}
 
         content = six.ensure_binary('upload-content')
         upload_content = six.BytesIO(content)
-        postparams = {"name": "test-flask-upload", "package_id": pkg["id"], "upload": (upload_content, "test-upload.txt")}
-        monkeypatch.setattr(builtins, 'open', mock_open_if_open_fails)
+        postparams = {
+            "name": "test-flask-upload",
+            "package_id": pkg["id"],
+            "upload": (upload_content, "test-upload.txt")}
 
         resp = app.post(
             url,
@@ -80,9 +62,7 @@ class TestApiController(object):
     @pytest.mark.usefixtures("clean_index")
     def test_dataset_autocomplete_name(self, app):
         dataset = factories.Dataset(name="rivers")
-        url = url_for(
-            controller="api", action="dataset_autocomplete", ver="/2"
-        )
+        url = url_for("api.dataset_autocomplete", ver=2)
         assert url == "/api/2/util/dataset/autocomplete"
 
         response = app.get(url=url, query_string={"incomplete": u"rive"}, status=200)
@@ -108,9 +88,7 @@ class TestApiController(object):
     @pytest.mark.usefixtures("clean_index")
     def test_dataset_autocomplete_title(self, app):
         dataset = factories.Dataset(name="test_ri", title="Rivers")
-        url = url_for(
-            controller="api", action="dataset_autocomplete", ver="/2"
-        )
+        url = url_for("api.dataset_autocomplete", ver=2)
         assert url == "/api/2/util/dataset/autocomplete"
 
         response = app.get(url=url, query_string={"incomplete": u"riv"}, status=200)
@@ -135,7 +113,7 @@ class TestApiController(object):
 
     def test_tag_autocomplete(self, app):
         factories.Dataset(tags=[{"name": "rivers"}])
-        url = url_for(controller="api", action="tag_autocomplete", ver="/2")
+        url = url_for("api.tag_autocomplete", ver=2)
         assert url == "/api/2/util/tag/autocomplete"
 
         response = app.get(url=url, query_string={"incomplete": u"rive"}, status=200)
@@ -149,7 +127,7 @@ class TestApiController(object):
 
     def test_group_autocomplete_by_name(self, app):
         org = factories.Group(name="rivers", title="Bridges")
-        url = url_for(controller="api", action="group_autocomplete", ver="/2")
+        url = url_for("api.group_autocomplete", ver=2)
         assert url == "/api/2/util/group/autocomplete"
 
         response = app.get(url=url, query_string={"q": u"rive"}, status=200)
@@ -165,7 +143,7 @@ class TestApiController(object):
 
     def test_group_autocomplete_by_title(self, app):
         org = factories.Group(name="frogs", title="Bugs")
-        url = url_for(controller="api", action="group_autocomplete", ver="/2")
+        url = url_for("api.group_autocomplete", ver=2)
 
         response = app.get(url=url, query_string={"q": u"bug"}, status=200)
 
@@ -175,9 +153,7 @@ class TestApiController(object):
 
     def test_organization_autocomplete_by_name(self, app):
         org = factories.Organization(name="simple-dummy-org")
-        url = url_for(
-            controller="api", action="organization_autocomplete", ver="/2"
-        )
+        url = url_for("api.organization_autocomplete", ver=2)
         assert url == "/api/2/util/organization/autocomplete"
 
         response = app.get(url=url, query_string={"q": u"simple"}, status=200)
@@ -193,9 +169,7 @@ class TestApiController(object):
 
     def test_organization_autocomplete_by_title(self, app):
         org = factories.Organization(title="Simple dummy org")
-        url = url_for(
-            controller="api", action="organization_autocomplete", ver="/2"
-        )
+        url = url_for("api.organization_autocomplete", ver=2)
 
         response = app.get(url=url, query_string={"q": u"simple dum"}, status=200)
 
@@ -206,10 +180,9 @@ class TestApiController(object):
     def test_config_option_list_access_sysadmin(self, app):
         user = factories.Sysadmin()
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="config_option_list",
-            ver="/3",
+            ver=3,
         )
 
         app.get(
@@ -222,10 +195,9 @@ class TestApiController(object):
     def test_config_option_list_access_sysadmin_jsonp(self, app):
         user = factories.Sysadmin()
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="config_option_list",
-            ver="/3",
+            ver=3,
         )
 
         app.get(
@@ -241,10 +213,9 @@ class TestApiController(object):
         dataset2 = factories.Dataset()
 
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="package_list",
-            ver="/3",
+            ver=3,
         )
 
         res = app.get(url=url, query_string={"callback": "my_callback"})
@@ -260,10 +231,9 @@ class TestApiController(object):
 
     def test_jsonp_returns_javascript_content_type(self, app):
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="status_show",
-            ver="/3",
+            ver=3,
         )
 
         res = app.get(url=url, query_string={"callback": "my_callback"})
@@ -275,10 +245,9 @@ class TestApiController(object):
         dataset2 = factories.Dataset()
 
         url = url_for(
-            controller="api",
-            action="action",
+            "api.action",
             logic_function="package_list",
-            ver="/3",
+            ver=3,
             callback="my_callback",
         )
 

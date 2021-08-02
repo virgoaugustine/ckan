@@ -32,7 +32,7 @@ from flask.testing import Client as FlaskClient
 from flask.wrappers import Response
 from click.testing import CliRunner
 import pytest
-import mock
+import unittest.mock as mock
 import rq
 import six
 
@@ -43,6 +43,8 @@ import ckan.lib.search as search
 import ckan.config.middleware
 import ckan.model as model
 import ckan.logic as logic
+
+log = logging.getLogger(__name__)
 
 
 def reset_db():
@@ -148,10 +150,11 @@ def call_auth(auth_name, context, **kwargs):
         e.g. ``{'user': 'fred', 'model': my_mock_model_object}``
     :type context: dict
 
-    :returns: the dict that the auth function returns, e.g.
-        ``{'success': True}`` or ``{'success': False, msg: '...'}``
+    :returns: the 'success' value of the authorization check, e.g.
+        ``{'success': True}`` or
+        ``{'success': False, msg: 'important error message'}``
         or just ``{'success': False}``
-    :rtype: dict
+    :rtype: bool
 
     """
     assert "user" in context, (
@@ -200,10 +203,7 @@ class CKANTestApp(object):
     @property
     def flask_app(self):
         if not self._flask_app:
-            if six.PY2:
-                self._flask_app = self.app.apps["flask_app"]._wsgi_app
-            else:
-                self._flask_app = self.app._wsgi_app
+            self._flask_app = self.app._wsgi_app
         return self._flask_app
 
     def __init__(self, app):
@@ -211,8 +211,6 @@ class CKANTestApp(object):
 
     def test_client(self, use_cookies=True):
         return CKANTestClient(self.app, CKANResponse, use_cookies=use_cookies)
-        self.flask_app.test_client_class = CKANTestClient
-        return self.flask_app.test_client()
 
     def options(self, url, *args, **kwargs):
         res = self.test_client().options(url, *args, **kwargs)
@@ -240,7 +238,18 @@ class CKANTestApp(object):
 
 class CKANTestClient(FlaskClient):
     def open(self, *args, **kwargs):
-        kwargs.pop('expect_errors', None)
+        # extensions with support of CKAN<2.9 can use this parameter
+        # to make errors of webtest.TestApp more verbose. FlaskClient
+        # doesn't have anything similar, so we'll just drop this
+        # parameter for backward compatibility and ask for updating
+        # the code when possible.
+        if kwargs.pop('expect_errors', None):
+            log.warning(
+                '`expect_errors` parameter passed to `test_app.post` '
+                'has no effect. Remove it or pass conditionally, for '
+                'CKAN version prior 2.9.0.'
+            )
+
         status = kwargs.pop("status", None)
         extra_environ = kwargs.pop("extra_environ", None)
         if extra_environ:
@@ -277,10 +286,7 @@ def _get_test_app():
     """
     config["ckan.legacy_templates"] = False
     config["testing"] = True
-    if six.PY2:
-        app = ckan.config.middleware.make_app(config)
-    else:
-        app = ckan.config.middleware.make_app(config)
+    app = ckan.config.middleware.make_app(config)
     app = CKANTestApp(app)
 
     return app
@@ -325,8 +331,6 @@ class FunctionalTestBase(object):
 
     @classmethod
     def setup_class(cls):
-        import ckan.plugins as p
-
         # Make a copy of the Pylons config, so we can restore it in teardown.
         cls._original_config = dict(config)
         cls._apply_config_changes(config)
